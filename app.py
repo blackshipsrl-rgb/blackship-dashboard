@@ -1,100 +1,115 @@
 import streamlit as st
+import ccxt
+import pandas as pd
 import time
 
 # ---------------------------------------------------------
 # CONFIGURAZIONE PAGINA
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="Blackship Group | Dashboard",
+    page_title="Blackship | Live Tracker",
     page_icon="🏴‍☠️",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# ---------------------------------------------------------
-# STILE VISIVO (CSS Semplice per sembrare Pro)
-# ---------------------------------------------------------
+# CSS PER STILE DARK PRO
 st.markdown("""
 <style>
-    .metric-card {
-        background-color: #1e1e1e;
-        padding: 20px;
-        border-radius: 10px;
-        border: 1px solid #333;
-        text-align: center;
-    }
-    .stApp {
-        background-color: #0e1117;
-    }
-    h1, h2, h3 {
-        color: #ffffff;
-    }
+    .stApp { background-color: #0e1117; }
+    div[data-testid="stMetricValue"] { font-size: 28px; color: #00ff00; }
+    .css-1544g2n { padding: 2rem 1rem; }
 </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# SIDEBAR (Colonna sinistra)
+# FUNZIONI DI CONNESSIONE (IL MOTORE)
+# ---------------------------------------------------------
+def get_bybit_data(api_key, api_secret):
+    try:
+        # Connessione a Bybit
+        exchange = ccxt.bybit({
+            'apiKey': api_key,
+            'secret': api_secret,
+            'enableRateLimit': True,
+        })
+        
+        # Scarica il Bilancio (Unified Account)
+        balance_data = exchange.fetch_balance()
+        
+        # Cerchiamo i dati USDT
+        if 'USDT' in balance_data['total']:
+            total_balance = balance_data['total']['USDT'] # Saldo Wallet
+            equity = balance_data['total']['USDT'] # In UTA spesso coincide se non ci sono posizioni aperte
+            
+            # Se ci sono posizioni aperte, l'equity cambia. 
+            # Per semplicità ora prendiamo il total
+            return total_balance, equity
+        else:
+            return 0.0, 0.0
+            
+    except Exception as e:
+        return None, str(e)
+
+# ---------------------------------------------------------
+# SIDEBAR - INGRESSO DATI
 # ---------------------------------------------------------
 with st.sidebar:
-    st.title("🏴‍☠️ BLACKSHIP")
+    st.image("https://img.icons8.com/color/96/000000/pirate.png", width=50)
+    st.title("BLACKSHIP")
+    st.caption("Investor Dashboard v1.2")
     st.markdown("---")
-    st.write("**Benvenuto, Trader.**")
     
-    account_id = st.text_input("Inserisci Account ID", value="DEMO-12345")
+    st.write("🔑 **Inserisci API Key Bybit**")
+    user_key = st.text_input("API Key", type="password")
+    user_secret = st.text_input("API Secret", type="password")
     
-    if st.button("🔄 Aggiorna Dati"):
-        with st.spinner('Connessione a Bybit in corso...'):
-            time.sleep(1) # Simuliamo il tempo di caricamento
-        st.success("Dati aggiornati!")
-    
-    st.markdown("---")
-    st.info("💡 Stato Sistema: **ONLINE**")
+    st.info("ℹ️ Usa chiavi 'Read-Only'. Il sistema non ha permessi di prelievo.")
 
 # ---------------------------------------------------------
-# CORPO PRINCIPALE (Main Dashboard)
+# DASHBOARD PRINCIPALE
 # ---------------------------------------------------------
+st.title("📡 Live Trading Monitor")
 
-st.title("📊 Trading Dashboard")
-st.markdown("Monitoraggio in tempo reale del tuo conto **Hybrid**.")
+# SE L'UTENTE HA MESSO LE CHIAVI -> CONNESSIONE VERA
+if user_key and user_secret:
+    with st.spinner('Connessione al satellite Bybit...'):
+        balance, equity = get_bybit_data(user_key, user_secret)
+        
+    if balance is None:
+        st.error(f"Errore di connessione: {equity}")
+        st.warning("Controlla che le chiavi siano corrette e di tipo 'Unified Trading'.")
+    else:
+        # DATI REALI
+        start_balance = 50000.00 # Simuliamo che la challenge sia da 50k
+        profit = equity - start_balance
+        profit_pct = (profit / start_balance) * 100
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("💰 Wallet Balance", f"${balance:,.2f}")
+        col2.metric("📈 Live Equity", f"${equity:,.2f}", f"{profit:,.2f} ({profit_pct:.2f}%)")
+        col3.metric("🎯 Target (Investor)", "$60,000.00", "20%")
+        
+        st.markdown("---")
+        
+        # BARRA PROGRESSO
+        target_val = 60000
+        progress = (equity - start_balance) / (target_val - start_balance)
+        if progress < 0: progress = 0.0
+        if progress > 1: progress = 1.0
+        
+        st.write(f"Progresso verso il Target:")
+        st.progress(progress)
+        
+        if equity < (start_balance * 0.90):
+            st.error("🚫 STOP OUT: Il conto ha superato il limite di perdita.")
+        else:
+            st.success("✅ CONTO ATTIVO: Trading consentito.")
 
-# SIMULIAMO DEI DATI (Presto collegheremo Bybit qui)
-balance = 50000.00
-equity = 51250.50
-profit = equity - balance
-profit_percent = (profit / balance) * 100
-target = 57500.00 # Target 15%
-drawdown_limit = 45000.00 # Max DD 10%
-
-# CREIAMO 3 COLONNE PER I NUMERI
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.metric(label="💰 Balance", value=f"${balance:,.2f}")
-
-with col2:
-    st.metric(label="📈 Equity (Live)", value=f"${equity:,.2f}", delta=f"{profit:,.2f} ({profit_percent:.2f}%)")
-
-with col3:
-    distance_target = target - equity
-    st.metric(label="🎯 Distanza dal Target", value=f"${distance_target:,.2f}")
-
-st.markdown("---")
-
-# BARRA DI PROGRESSO E GRAFICO
-st.subheader("Stato della Challenge")
-
-# Calcolo progresso
-progress = profit_percent / 15 # 15% è il target
-if progress < 0: progress = 0
-if progress > 1: progress = 1
-
-st.write(f"Progresso verso il Target ($ {target:,.0f}):")
-st.progress(progress)
-
-# Messaggio Dinamico
-if equity < drawdown_limit:
-    st.error("❌ HARD BREACH: Hai superato il limite di Drawdown. Conto Squalificato.")
-elif equity >= target:
-    st.success("🏆 COMPLIMENTI! Hai superato la Fase 1.")
+# SE NON HA MESSO LE CHIAVI -> MOSTRA DEMO
 else:
-    st.info("✅ Il conto è ATTIVO e in buona salute. Continua a tradare.")
+    st.warning("⚠️ Inserisci le tue API Key a sinistra per vedere i dati reali.")
+    st.markdown("### Dati Demo (Esempio)")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Balance", "$50,000.00")
+    c2.metric("Equity", "$51,250.00", "+2.5%")
+    c3.metric("Target", "$60,000.00")
